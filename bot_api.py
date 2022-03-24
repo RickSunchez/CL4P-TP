@@ -206,7 +206,7 @@ class TG_bot:
         if onNext:
             level = ref.child("actions/level").get()
 
-            level += 1
+            level = min(self.menuMessges[menu]["levels"], level + 1)
             onExit = level == self.menuMessges[menu]["levels"]
 
         if onMsg:
