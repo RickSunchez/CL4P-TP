@@ -10,8 +10,11 @@
 ```bash
 python3 main.py
 // ИЛИ
-// собираем контейнер и запускаем 
+
+// собираем контейнер 
 docker build -t chatbot .
+// и запускаем 
+docker run -d --restart=always --name=chatbot_container chatbot
 ```
 
 2. добавляем группы или каналы, важно:
