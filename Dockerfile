@@ -7,8 +7,7 @@ WORKDIR /app
 
 COPY ./main.py .
 COPY ./bot_api.py .
-COPY ./credentials.json .
-COPY ./fb.json .
+COPY ./src/* ./src/
 
 ENV PATH=/root/.local:$PATH
 
