@@ -4,8 +4,12 @@ import firebase_admin
 from firebase_admin import credentials, db
 
 try:
-    with open("credentials.json", "r") as cr:
-        CREDENTIALS = json.load(cr)
+    with open("./src/credentials.json", "r") as f:
+        CREDENTIALS = json.load(f)
+    with open("./src/dialogs.json", "r") as f:
+        DIALOGS = json.load(f)
+    with open("./src/TG_commands.json", "r") as f:
+        COMMANDS = json.load(f)
 except:
     print("Can't open credentials.json")
     exit()
@@ -15,6 +19,24 @@ firebase_admin.initialize_app(cred, {
 	"databaseURL": CREDENTIALS["firebase"]["db_url"]
 })
 
+def dialog(fullPath=""):
+    path = fullPath.split("/")
+    cmd = path.pop()
+    
+    def search(i, obj):
+        for d in obj:
+            if path[i] == d["name"]:
+                if i == len(path) - 1:
+                    return d["dialog"][cmd]
+                else:
+                    return search(i+1, d["inner"])
+        
+        return False
+
+    return search(0, DIALOGS)
+
+dialog("root/add_new/good")
+    
 class TG_bot:
     def __init__(self, token):
         self.T = token
@@ -24,42 +46,18 @@ class TG_bot:
         self.offset = 0
         self.http = urllib3.PoolManager()
         
-        self.getMe()
-
-        self.menuMessges = {
-            "root": {
-                "levels": 2,
-                "messages": [
-                    "Этот бот поможет тебе закинуть однотипные посты в разные группы. Для начала, предлагаю добавить пару групп: /add_new",
-                    "Теперь можно создать свой первый пост: /create_post",
-                    "А теперь можешь полюбоваться своей работой))"
-                ]
-            },
-            "addNew": {
-               "levels": 2, 
-               "messages": [
-                   "Введи ссылку на чат в Telegram, можно ввести несколько, как закончишь введи /next",
-                   "Отлично! Как группы кончатся, введи /next",
-                   "Группы сохранены"
-               ]
-            },
-            "createPost": {
-                "levels": 2,
-                "messages": [
-                    "Просто введи сообщение и отправь его мне",
-                    "Шикарно! Можешь создать еше один пост или выйти: /next",
-                    "Обращайся и не забудь задонатить разработчику))"
-                ]
-            }
-        }
-
-        self.menuName = lambda num: list(self.menuMessges.keys())[num]
-        self.WTN = lambda key: list(self.menuMessges.keys()).index(key)
+        if not self.getMe():
+            print("api problem, check token")
+            exit()
 
     def getMe(self):
         data = self.__query("/getMe", {})
         if data["ok"]:
             self.ID = data["result"]["id"]
+        else:
+            return False
+
+        return True
 
     def getUpdates(self):
         body = {
@@ -75,49 +73,32 @@ class TG_bot:
             uID = upd["message"]["from"]["id"]
             cID = upd["message"]["chat"]["id"]
 
-            if "text" in upd["message"]:
-                text = upd["message"]["text"]
+            action = self.__menuNav(cID)
+
+            if action != "root":
+                if "add_new" in action:
+                    self.__addNew(upd["message"], cID, uID)
+                if "create_post" in action:
+                    self.__createPost(upd["message"], cID, uID)
+                    print("create_post")
+                
+                continue
 
             if "entities" in upd["message"]:
+                onCommand = False
                 for ent in upd["message"]["entities"]:
                     if ent["type"] == "bot_command":
-                        self.__execCommand(text, cID, uID)
-                    if ent["type"] == "url":
-                        self.__execText(text, cID, uID)
+                        onCommand = True
+                        self.__execCommand(upd["message"]["text"], cID, uID)
+                
+                if not onCommand:
+                    self.sendMessage(cID, self.__msg("root/error"))
             else:
-                if self.__getMenuPlace(uID)["name"] == self.menuName(2):
-                    self.__execText("", cID, uID, upd)
-                else:
-                    self.sendMessage(cID, "Принимаю только ссылки или команды")
+                self.sendMessage(cID, self.__msg("root/error"))
 
     def setMyCommands(self):
-        body = {
-            "commands": json.dumps([
-                {
-                    "command": "/start",
-                    "description": "Стартуем"
-                },
-                {
-                    "command": "/about",
-                    "description": "Что вообще происходит"
-                },
-                {
-                    "command": "/add_new",
-                    "description": "Добавить"
-                },
-                {
-                    "command": "/create_post",
-                    "description": "Создать пост"
-                },
-                {
-                    "command": "/next",
-                    "description": "Дальше по меню"
-                }
-            ])
-        }
-
         self.__query("/deleteMyCommands", {})
-        self.__query("/setMyCommands", body)
+        self.__query("/setMyCommands", {"commands": json.dumps(COMMANDS)})
 
     def sendMessage(self, chatID, text):
         self.__query(
@@ -151,6 +132,25 @@ class TG_bot:
         else:
             return False
 
+    def __msg(self, fullPath="", dialog=True):
+        path = fullPath.split("/")
+        if dialog: cmd = path.pop()
+        
+        def search(i, obj):
+            for d in obj:
+                if path[i] == d["name"]:
+                    if i == len(path) - 1:
+                        if dialog:
+                            return d["dialog"][cmd]
+                        else:
+                            return d["message"]
+                    else:
+                        return search(i+1, d["inner"])
+            
+            return False
+
+        return search(0, DIALOGS)
+        
     def __isAdmin(self, chatID):
         data = self.__query(
             "/getChatMember",
@@ -162,11 +162,12 @@ class TG_bot:
 
         return data["result"]["status"] == "administrator"
 
-    def __query(self, method, fields):
+    def __query(self, method, fields, timeout=None):
         request = self.http.request(
             "GET", 
             self.link + method,
-            fields=fields
+            fields=fields,
+            timeout=timeout
         )
 
         return json.loads(request.data.decode('utf-8'))
@@ -183,44 +184,36 @@ class TG_bot:
             }
         })
 
-    def __getMenuPlace(self, userID):
-        ref = db.reference("/" + str(userID))
-        if ref.get() is None: return False
-        
-        return ref.child("actions").get()
-
     def __pushGroup(self, userID, groupID):
         ref = db.reference("/" + str(userID))
         if ref.get() is None: return False
 
-        ref.child("groups").push(groupID)
+        groups = ref.child("groups").get()
 
-    def __menuNav(self, chatID, userID, menu, onNext, onMsg):
+        for g in groups:
+            if groupID == groups[g]: return False
+        
+        ref.child("groups").push(groupID)
+        return True
+
+    def __menuNav(self, userID, menu=None):
         ref = db.reference("/" + str(userID))
         if ref.get() is None: return False
 
-        level = 0
-        menu = menu if menu != "" else ref.child("actions/name").get()
-        onExit = False
+        current = ref.child("actions/name").get()
 
-        if onNext:
-            level = ref.child("actions/level").get()
-
-            level = min(self.menuMessges[menu]["levels"], level + 1)
-            onExit = level == self.menuMessges[menu]["levels"]
-
-        if onMsg:
-            if onExit:
-                self.sendMessage(chatID, self.menuMessges[menu]["messages"][level])
-                level = self.WTN(menu)
-                menu = "root"
-                
-            self.sendMessage(chatID, self.menuMessges[menu]["messages"][level])
-
-        ref.child("actions/level").set(level)
-        ref.child("actions/name").set(menu)
+        if menu == "back":
+            if current != "root":
+                current = "/".join(current.split("/")[:-1])
+                ref.child("actions/name").set(current)
             
-        return level
+            return current
+        elif menu != None:
+            current = menu
+
+        ref.child("actions/name").set(current)
+
+        return current 
 
     def __getGroupList(self, userID):
         ref = db.reference("/" + str(userID))
@@ -236,34 +229,58 @@ class TG_bot:
         if cmd == "/start":
             self.setMyCommands()
             self.__addUser(userID)
-            self.sendMessage(chatID, "Hi!")
+            self.sendMessage(chatID, self.__msg("root", False))
         if cmd == "/about":
-            self.sendMessage(chatID, "Some strings about")
+            self.sendMessage(chatID, self.__msg("about", False))
         if cmd == "/add_new":
-            self.__menuNav(chatID, userID, self.menuName(1), False, True)
+            self.sendMessage(chatID, self.__msg("root/add_new", False))
+            self.__menuNav(userID, "root/add_new")
         if cmd == "/create_post":
-            self.__menuNav(chatID, userID, self.menuName(2), False, True)
-        if cmd == "/next":
-            self.__menuNav(chatID, userID, "", True, True)
+            self.sendMessage(chatID, self.__msg("root/create_post", False))
+            self.__menuNav(userID, "root/create_post")
+        if cmd == "/exit":
+            self.__menuNav(userID, "back")
+            self.sendMessage(chatID, self.__msg("root/back"))
 
-    def __execText(self, text, chatID, userID, fullMsg=None):
-        mp = self.__getMenuPlace(userID)
-        
-        if mp["name"] == self.menuName(1) and mp["level"] < 2:
-            if mp["level"] == 0: self.__menuNav(chatID, userID, "", True, False)
+    def __addNew(self, message, chatID, userID):
+        url = None
+        if "entities" in message:
+            for ent in message["entities"]:
+                if ent["type"] == "bot_command":
+                    if message["text"] == "/exit":
+                        self.__menuNav(userID, "back")
+                        self.sendMessage(chatID, self.__msg("root/add_new/exit"))
+                        return True
+                if ent["type"] == "url":
+                    url = message["text"]
+            if url is None:
+                self.sendMessage(chatID, self.__msg("root/add_new/bad"))
+                return False
+        else:
+            self.sendMessage(chatID, self.__msg("root/add_new/bad"))
+            return False
 
-            groupID = self.__getChatID(text)
-            if groupID and self.__isAdmin(groupID):
-                self.sendMessage(chatID, self.menuMessges[mp["name"]]["messages"][1])
-                self.__pushGroup(chatID, groupID)
+        groupID = self.__getChatID(url)
+        if groupID and self.__isAdmin(groupID):
+            if not self.__pushGroup(userID, groupID):
+                self.sendMessage(chatID, self.__msg("root/add_new/exists"))
             else:
-                self.sendMessage(chatID, "Бот не является администратором канала! Или канал приватный")
+                self.sendMessage(chatID, self.__msg("root/add_new/good"))
+        else:
+            self.sendMessage(chatID, self.__msg("root/add_new/bad"))
 
-        if mp["name"] == self.menuName(2) and mp["level"] < 2:
-            if mp["level"] == 0: self.__menuNav(chatID, userID, "", True, False)
+    def __createPost(self, message, chatID, userID):
+        if "entities" in message:
+            for ent in message["entities"]:
+                if ent["type"] == "bot_command":
+                    if message["text"] == "/exit":
+                        self.__menuNav(userID, "back")
+                        self.sendMessage(chatID, self.__msg("root/create_post/exit"))
+                        return True
 
-            messageID = fullMsg["message"]["message_id"]
-            for groupID in self.__getGroupList(userID):
-                self.forwardMessage(groupID, userID, messageID)
+        for groupID in self.__getGroupList(userID):
+            self.forwardMessage(groupID, userID, message["message_id"])
 
-            self.sendMessage(chatID, self.menuMessges[mp["name"]]["messages"][1])
+        self.sendMessage(chatID, self.__msg("root/create_post/good"))
+
+        return True

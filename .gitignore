@@ -3,3 +3,4 @@ bot_env
 credentials.json
 fb.json
 .DS_Store
+./test

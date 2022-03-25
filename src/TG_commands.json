@@ -1,0 +1,22 @@
+[
+    {
+        "command": "/start",
+        "description": "Стартуем"
+    },
+    {
+        "command": "/about",
+        "description": "Что вообще происходит"
+    },
+    {
+        "command": "/add_new",
+        "description": "Добавить"
+    },
+    {
+        "command": "/create_post",
+        "description": "Создать пост"
+    },
+    {
+        "command": "/exit",
+        "description": "Завершить действие"
+    }
+]
