@@ -18,24 +18,6 @@ cred = credentials.Certificate(CREDENTIALS["firebase"]["credentials_file"])
 firebase_admin.initialize_app(cred, {
 	"databaseURL": CREDENTIALS["firebase"]["db_url"]
 })
-
-def dialog(fullPath=""):
-    path = fullPath.split("/")
-    cmd = path.pop()
-    
-    def search(i, obj):
-        for d in obj:
-            if path[i] == d["name"]:
-                if i == len(path) - 1:
-                    return d["dialog"][cmd]
-                else:
-                    return search(i+1, d["inner"])
-        
-        return False
-
-    return search(0, DIALOGS)
-
-dialog("root/add_new/good")
     
 class TG_bot:
     def __init__(self, token):
@@ -45,7 +27,7 @@ class TG_bot:
         self.link = "https://api.telegram.org/bot" + token
         self.offset = 0
         self.http = urllib3.PoolManager()
-        
+
         if not self.getMe():
             print("api problem, check token")
             exit()
@@ -80,7 +62,6 @@ class TG_bot:
                     self.__addNew(upd["message"], cID, uID)
                 if "create_post" in action:
                     self.__createPost(upd["message"], cID, uID)
-                    print("create_post")
                 
                 continue
 
@@ -132,22 +113,21 @@ class TG_bot:
         else:
             return False
 
-    def __msg(self, fullPath="", dialog=True):
+    def __msg(self, fullPath=""):
         path = fullPath.split("/")
-        if dialog: cmd = path.pop()
+        name = path.pop()
         
+        if len(path) == 0: return "Что-то пошло не так"
+
         def search(i, obj):
             for d in obj:
                 if path[i] == d["name"]:
                     if i == len(path) - 1:
-                        if dialog:
-                            return d["dialog"][cmd]
-                        else:
-                            return d["message"]
+                        return d["dialog"][name]          
                     else:
                         return search(i+1, d["inner"])
             
-            return False
+            return "Что-то пошло не так"
 
         return search(0, DIALOGS)
         
@@ -190,8 +170,9 @@ class TG_bot:
 
         groups = ref.child("groups").get()
 
-        for g in groups:
-            if groupID == groups[g]: return False
+        if groups is not None:
+            for g in groups:
+                if groupID == groups[g]: return False
         
         ref.child("groups").push(groupID)
         return True
@@ -220,6 +201,8 @@ class TG_bot:
         if ref.get() is None: return False
 
         data = ref.child("groups").get()
+        if data is None: return False
+
         out = []
         for g in data: out.append(data[g])
 
@@ -229,27 +212,35 @@ class TG_bot:
         if cmd == "/start":
             self.setMyCommands()
             self.__addUser(userID)
-            self.sendMessage(chatID, self.__msg("root", False))
+            self.sendMessage(chatID, self.__msg("root/message"))
         if cmd == "/about":
-            self.sendMessage(chatID, self.__msg("about", False))
+            self.sendMessage(chatID, self.__msg("about/message"))
         if cmd == "/add_new":
-            self.sendMessage(chatID, self.__msg("root/add_new", False))
+            self.sendMessage(chatID, self.__msg("root/add_new/message"))
             self.__menuNav(userID, "root/add_new")
         if cmd == "/create_post":
-            self.sendMessage(chatID, self.__msg("root/create_post", False))
-            self.__menuNav(userID, "root/create_post")
+            if not self.__getGroupList(userID):
+                self.sendMessage(chatID, self.__msg("root/on_empty_group"))
+            else:
+                self.sendMessage(chatID, self.__msg("root/create_post/message"))
+                self.__menuNav(userID, "root/create_post")
         if cmd == "/exit":
             self.__menuNav(userID, "back")
             self.sendMessage(chatID, self.__msg("root/back"))
 
     def __addNew(self, message, chatID, userID):
         url = None
+
         if "entities" in message:
             for ent in message["entities"]:
                 if ent["type"] == "bot_command":
                     if message["text"] == "/exit":
                         self.__menuNav(userID, "back")
-                        self.sendMessage(chatID, self.__msg("root/add_new/exit"))
+
+                        if not self.__getGroupList(userID):
+                            self.sendMessage(chatID, self.__msg("root/add_new/bad_exit"))
+                        else:
+                            self.sendMessage(chatID, self.__msg("root/add_new/exit"))
                         return True
                 if ent["type"] == "url":
                     url = message["text"]
@@ -278,7 +269,11 @@ class TG_bot:
                         self.sendMessage(chatID, self.__msg("root/create_post/exit"))
                         return True
 
-        for groupID in self.__getGroupList(userID):
+        GL = self.__getGroupList(userID)
+        if not GL:
+            self.sendMessage(chatID, self.__msg("root/create_post/bad"))
+            return False
+        for groupID in GL:
             self.forwardMessage(groupID, userID, message["message_id"])
 
         self.sendMessage(chatID, self.__msg("root/create_post/good"))
