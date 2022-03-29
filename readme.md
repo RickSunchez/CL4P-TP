@@ -14,7 +14,7 @@ python3 main.py
 // собираем контейнер 
 docker build -t chatbot .
 // и запускаем 
-docker run -d --restart=always --name=chatbot_container chatbot
+docker run -d --restart=always --name=cl4p-tp chatbot
 ```
 
 2. добавляем группы или каналы, важно:

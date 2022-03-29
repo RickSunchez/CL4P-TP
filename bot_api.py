@@ -74,8 +74,8 @@ class TG_bot:
             cID = upd["message"]["chat"]["id"]
 
             action = self.__menuNav(cID)
-
-            if action != "root":
+            
+            if action and action != "root":
                 if "add_new" in action:
                     self.__addNew(upd["message"], cID, uID)
                 if "create_post" in action:
